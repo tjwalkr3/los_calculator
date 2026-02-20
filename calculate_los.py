@@ -2,7 +2,7 @@
 Line-of-sight calculator class for analyzing visibility between two peaks.
 
 This module accounts for Earth's curvature with standard atmospheric refraction (k=4/3).
-It uses the open-elevation API to retrieve terrain elevation data.
+It uses cached elevation data (no external API calls).
 
 Example usage:
     peak1 = {
@@ -32,7 +32,6 @@ import os
 import numpy as np
 import numpy.typing as npt
 import matplotlib.pyplot as plt
-import requests
 from geopy.distance import geodesic
 from typing import Optional, Dict, List
 
@@ -115,43 +114,25 @@ class LOSCalculator:
         self._calculated = True
 
     def _get_elevations(self, latitudes, longitudes):
-        """Query Open-Elevation API in chunks or use cache."""
+        """Get elevations from cache using nearest grid point lookup."""
         elevations = []
-        uncached_indices = []
-        uncached_coords = []
+        grid_resolution = 0.01  # Cache grid spacing from prefetch_elevations
 
-        for i, (lat, lon) in enumerate(zip(latitudes, longitudes)):
-            coord_key = f"{lat:.6f},{lon:.6f}"
+        for lat, lon in zip(latitudes, longitudes):
+            # Round to nearest grid point
+            nearest_lat = round(lat / grid_resolution) * grid_resolution
+            nearest_lon = round(lon / grid_resolution) * grid_resolution
+            coord_key = f"{nearest_lat:.6f},{nearest_lon:.6f}"
+            
             if coord_key in self.elevation_cache:
                 elevations.append(self.elevation_cache[coord_key])
             else:
-                elevations.append(0.0)
-                uncached_indices.append(i)
-                uncached_coords.append((lat, lon))
-
-        if uncached_coords:
-            locations = [
-                {"latitude": lat, "longitude": lon} for lat, lon in uncached_coords
-            ]
-            url = "https://api.open-elevation.com/api/v1/lookup"
-            chunk_size = 100
-            fetched_elevations = []
-
-            for i in range(0, len(locations), chunk_size):
-                chunk = locations[i : i + chunk_size]
-                response = requests.post(url, json={"locations": chunk}, timeout=20)
-                if response.status_code == 200:
-                    data = response.json()
-                    fetched_elevations.extend(
-                        result["elevation"] for result in data["results"]
-                    )
+                # Fallback: try exact match
+                exact_key = f"{lat:.6f},{lon:.6f}"
+                if exact_key in self.elevation_cache:
+                    elevations.append(self.elevation_cache[exact_key])
                 else:
-                    raise RuntimeError(
-                        f"Elevation API request failed with status code {response.status_code}"
-                    )
-
-            for idx, elev in zip(uncached_indices, fetched_elevations):
-                elevations[idx] = elev
+                    elevations.append(0.0)
 
         return elevations
 

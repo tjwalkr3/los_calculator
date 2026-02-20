@@ -1,6 +1,7 @@
 """Find and pair peaks in the US."""
 
-import requests
+import json
+import os
 from geopy.distance import geodesic
 from typing import List, Tuple
 
@@ -9,6 +10,8 @@ from peak import Peak
 
 class PeakPairFinder:
     """Find peaks over a given elevation and generate valid pairings."""
+
+    CACHE_FILE = "peaks_cache.json"
 
     def __init__(self, min_elevation_feet: int = 13000):
         """
@@ -22,66 +25,19 @@ class PeakPairFinder:
         self._peaks: List[Peak] = []
         self._peaks_loaded = False
 
-    def _fetch_peaks_from_api(self) -> List[Peak]:
-        """Fetch peaks from Overpass API (OpenStreetMap)."""
-        min_elev = self.min_elevation_m
-        overpass_url = "https://overpass-api.de/api/interpreter"
-
-        regions = [
-            (37.0, 41.0, -109.0, -102.0),
-            (35.5, 42.0, -124.5, -114.0),
-            (41.0, 45.0, -111.0, -104.0),
-            (31.3, 37.0, -109.0, -103.0),
-            (51.0, 71.5, -180.0, -130.0),
-            (43.0, 49.0, -125.0, -116.0),
-        ]
-
-        peaks: List[Peak] = []
-
-        for south, north, west, east in regions:
-            query = f"""
-            [out:json][timeout:60];
-            (
-              node["natural"="peak"]({south},{west},{north},{east});
-            );
-            out body;
-            """
-
-            try:
-                response = requests.post(overpass_url, data={"data": query}, timeout=90)
-
-                if response.status_code != 200:
-                    continue
-
-                data = response.json()
-
-                for element in data.get("elements", []):
-                    if "tags" in element:
-                        tags = element["tags"]
-                        if "ele" in tags:
-                            try:
-                                elevation_m = float(tags["ele"])
-                                if elevation_m >= min_elev:
-                                    name = tags.get("name", f"Peak_{element['id']}")
-                                    peaks.append(
-                                        {
-                                            "name": name,
-                                            "lat": element["lat"],
-                                            "lon": element["lon"],
-                                            "elevation_m": elevation_m,
-                                        }
-                                    )
-                            except (ValueError, KeyError):
-                                continue
-            except Exception:
-                continue
-
-        return peaks
+    def _load_peaks_from_cache(self) -> List[Peak]:
+        """Load peaks from cache file."""
+        if not os.path.exists(self.CACHE_FILE):
+            raise FileNotFoundError(
+                f"{self.CACHE_FILE} not found. Please run peak prefetching first."
+            )
+        with open(self.CACHE_FILE, "r") as f:
+            return json.load(f)
 
     def _load_peaks(self):
-        """Load peaks from API if not already loaded."""
+        """Load peaks from cache."""
         if not self._peaks_loaded:
-            self._peaks = self._fetch_peaks_from_api()
+            self._peaks = self._load_peaks_from_cache()
             self._peaks_loaded = True
 
     def _calculate_distance_km(self, peak1: Peak, peak2: Peak) -> float:
