@@ -27,11 +27,14 @@ Example usage:
     calculator.generate_elevation_profile()
 """
 
+import json
+import os
 import numpy as np
 import numpy.typing as npt
 import matplotlib.pyplot as plt
 import requests
 from geopy.distance import geodesic
+from typing import Optional, Dict, List
 
 from peak import Peak
 
@@ -43,16 +46,23 @@ class LOSCalculator:
     REFRACTION_FACTOR = 4.0 / 3.0
     NUM_SAMPLES = 200
 
-    def __init__(self, peak1: Peak, peak2: Peak):
+    def __init__(
+        self,
+        peak1: Peak,
+        peak2: Peak,
+        elevation_cache: Optional[Dict[str, List[float]]] = None,
+    ):
         """
         Initialize calculator with two peaks.
 
         Args:
             peak1: Dict with keys: name, lat, lon, elevation_m
             peak2: Dict with keys: name, lat, lon, elevation_m
+            elevation_cache: Optional cache dict mapping coordinate keys to elevation lists
         """
         self.peak1 = peak1
         self.peak2 = peak2
+        self.elevation_cache = elevation_cache or self._load_cache()
         self._calculated = False
         self._distance_km: float = 0.0
         self._los_limit_km: float = 0.0
@@ -61,6 +71,14 @@ class LOSCalculator:
         self._los_line: npt.NDArray[np.float64] = np.array([])
         self._curvature_drop_m: float = 0.0
         self._is_clear: bool = False
+
+    def _load_cache(self) -> Dict[str, List[float]]:
+        """Load elevation cache from file if it exists."""
+        cache_file = "elevation_cache.json"
+        if os.path.exists(cache_file):
+            with open(cache_file, "r") as f:
+                return json.load(f)
+        return {}
 
     def _calculate(self):
         """Perform all calculations (called lazily)."""
@@ -97,25 +115,43 @@ class LOSCalculator:
         self._calculated = True
 
     def _get_elevations(self, latitudes, longitudes):
-        """Query Open-Elevation API in chunks."""
-        locations = [
-            {"latitude": lat, "longitude": lon}
-            for lat, lon in zip(latitudes, longitudes)
-        ]
-        url = "https://api.open-elevation.com/api/v1/lookup"
-        chunk_size = 100
+        """Query Open-Elevation API in chunks or use cache."""
         elevations = []
+        uncached_indices = []
+        uncached_coords = []
 
-        for i in range(0, len(locations), chunk_size):
-            chunk = locations[i : i + chunk_size]
-            response = requests.post(url, json={"locations": chunk}, timeout=20)
-            if response.status_code == 200:
-                data = response.json()
-                elevations.extend(result["elevation"] for result in data["results"])
+        for i, (lat, lon) in enumerate(zip(latitudes, longitudes)):
+            coord_key = f"{lat:.6f},{lon:.6f}"
+            if coord_key in self.elevation_cache:
+                elevations.append(self.elevation_cache[coord_key])
             else:
-                raise RuntimeError(
-                    f"Elevation API request failed with status code {response.status_code}"
-                )
+                elevations.append(0.0)
+                uncached_indices.append(i)
+                uncached_coords.append((lat, lon))
+
+        if uncached_coords:
+            locations = [
+                {"latitude": lat, "longitude": lon} for lat, lon in uncached_coords
+            ]
+            url = "https://api.open-elevation.com/api/v1/lookup"
+            chunk_size = 100
+            fetched_elevations = []
+
+            for i in range(0, len(locations), chunk_size):
+                chunk = locations[i : i + chunk_size]
+                response = requests.post(url, json={"locations": chunk}, timeout=20)
+                if response.status_code == 200:
+                    data = response.json()
+                    fetched_elevations.extend(
+                        result["elevation"] for result in data["results"]
+                    )
+                else:
+                    raise RuntimeError(
+                        f"Elevation API request failed with status code {response.status_code}"
+                    )
+
+            for idx, elev in zip(uncached_indices, fetched_elevations):
+                elevations[idx] = elev
 
         return elevations
 

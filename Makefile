@@ -16,7 +16,4 @@ clean:
 reinstall: clean install
 
 run: install
-	$(VENV_DIR)/bin/python -B example.py
-
-run2: install
-	$(VENV_DIR)/bin/python -B example_peak_finder.py
+	$(VENV_DIR)/bin/python -B main.py
