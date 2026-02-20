@@ -45,8 +45,8 @@ print(f"Loaded {len(cache)} elevation grid points")
 
 print("\nStep 4: Finding peak pairs...")
 finder = PeakPairFinder(min_elevation_feet=13000)
-pairs = finder.get_peak_pairs(min_distance_km=350, max_distance_km=600)
-print(f"Found {len(pairs)} peak pairs between 400-600km apart")
+pairs = finder.get_peak_pairs(min_distance_km=331, max_distance_km=500)
+print(f"Found {len(pairs)} peak pairs between 350-500km apart")
 
 print("\nStep 5: Analyzing line-of-sight for all pairs...")
 
@@ -71,9 +71,6 @@ with ProcessPoolExecutor(max_workers=num_workers) as executor:
     for future in as_completed(future_to_pair):
         completed_count += 1
         
-        if completed_count % 100 == 0 or completed_count == len(pairs):
-            print(f"  Processed {completed_count}/{len(pairs)} pairs...")
-        
         try:
             stats, is_clear = future.result()
             statistics_lines.append(stats)
@@ -86,6 +83,11 @@ with ProcessPoolExecutor(max_workers=num_workers) as executor:
         except Exception as e:
             print(f"  Error processing pair: {e}")
             blocked_count += 1
+        
+        # Show progress every 10 pairs or at completion
+        if completed_count % 10 == 0 or completed_count == len(pairs):
+            percentage = (completed_count / len(pairs)) * 100
+            print(f"  Progress: {completed_count}/{len(pairs)} ({percentage:.1f}%) | Clear: {clear_count} | Blocked: {blocked_count}")
 
 print(f"\nStep 6: Saving statistics...")
 with open("elevation_profiles/statistics.txt", "w") as f:
