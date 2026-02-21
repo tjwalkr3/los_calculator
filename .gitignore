@@ -1,6 +1,7 @@
 elevation_profiles/*
 !elevation_profiles/.gitkeep
 elevation_cache.json
+peaks_cache.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
